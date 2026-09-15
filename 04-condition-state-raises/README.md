@@ -1,6 +1,6 @@
 # Video 4 — the fix
 
-Video: *(link added once published)*
+Video: https://youtu.be/VVcF6ITRZYw
 AI starter prompt for this one: https://gist.github.com/pcamp99/33d77efcbd5a7867abb6e794e736c9e1
 
 `integration_watchdog.yaml` is the corrected version of the automation from the
