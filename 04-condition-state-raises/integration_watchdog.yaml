@@ -1,0 +1,101 @@
+# Integration Watchdog — from "My Home Assistant Watchdog Looked Healthy for
+# Weeks. This Condition Doesn't Fail the Way You Think" (video 4).
+#
+# Checks five integrations every 15 minutes via a sentinel entity per
+# integration, auto-reloads any whose sentinel goes unavailable, and notifies
+# if the reload doesn't recover it. Copy the shape, swap in your own entities.
+#
+# THE FIX THIS DEMONSTRATES: `condition: state` against a missing entity
+# raises an error instead of evaluating false — see [[the video]] for how
+# that was found and verified. This version avoids it two ways:
+#   1. Checks use `condition: template` with `states()`, which returns the
+#      string "unknown" for a nonexistent entity instead of raising.
+#   2. A self-check block alerts you when a sentinel stops EXISTING, not
+#      just when it goes unavailable — a watchdog that silently checks
+#      nothing is worse than no watchdog, because it still reads as green.
+#
+# Sentinels must be MAINS-POWERED and always present. A battery device or a
+# bulb on a switched outlet goes unavailable on its own and triggers
+# pointless reloads.
+#
+# Replace `notify.mobile_app_YOUR_DEVICE` with your own notify service, and
+# replace the `checks` list with your own integrations, sentinels, and
+# config entry IDs (Settings → Devices & Services → your integration → the
+# entry ID is in the URL when you open it).
+
+- id: integration_watchdog
+  alias: Integration Watchdog — Auto-Reload Failed Integrations
+  description: >-
+    Checks key integrations on a schedule, auto-reloads any whose sentinel
+    entity has gone unavailable, and notifies if the reload doesn't recover
+    it. Self-checks for sentinels that have stopped existing entirely.
+  triggers:
+    - trigger: time_pattern
+      minutes: /15
+  conditions: []
+  variables:
+    checks:
+      - name: GoveeLife
+        sentinel: light.ai_sync_box_strip_main
+        entry_id: 01KC5PNNG83EQ8R2A8AYWDMRXY
+        tag: watchdog_goveelife
+      - name: Iotty
+        sentinel: switch.master_ceiling_lights
+        entry_id: 01KJN5NQ5N8B4MSKAC7A7RMZXQ
+        tag: watchdog_iotty
+      - name: Abode
+        sentinel: alarm_control_panel.abode_alarm
+        entry_id: 01KB6QHX45DMVT9CVD3WN5KBYN
+        tag: watchdog_abode
+      - name: Sonos
+        sentinel: media_player.sonos_main_room
+        entry_id: 01JF64H3QV315990MYYV7DWPT9
+        tag: watchdog_sonos
+      - name: Blue Iris
+        sentinel: camera.lenovomini_reomain
+        entry_id: 01KKDG08VNV1CRA0M3E4Z5B4XE
+        tag: watchdog_blue_iris
+  actions:
+    - alias: "Self-check — is the watchdog still watching anything?"
+      variables:
+        missing_sentinels: >-
+          {% set ns = namespace(m=[]) %}
+          {% for c in checks %}{% if states[c.sentinel] is none %}{% set ns.m = ns.m + [c.name ~ ' (' ~ c.sentinel ~ ')'] %}{% endif %}{% endfor %}
+          {{ ns.m }}
+    - if:
+        - condition: template
+          value_template: "{{ missing_sentinels | count > 0 }}"
+      then:
+        - action: notify.mobile_app_YOUR_DEVICE
+          data:
+            title: "Integration Watchdog is blind"
+            message: >-
+              Sentinel entity no longer exists, so this integration is NOT
+              being checked: {{ missing_sentinels | join(', ') }}. Pick a new
+              mains-powered sentinel in automations.yaml.
+    - alias: Reload any integration whose sentinel is unavailable
+      repeat:
+        for_each: "{{ checks }}"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ states(repeat.item.sentinel) == 'unavailable' }}"
+            then:
+              - action: homeassistant.reload_config_entry
+                data:
+                  entry_id: "{{ repeat.item.entry_id }}"
+              - delay:
+                  seconds: 10
+              - if:
+                  - condition: template
+                    value_template: "{{ states(repeat.item.sentinel) == 'unavailable' }}"
+                then:
+                  - action: notify.mobile_app_YOUR_DEVICE
+                    data:
+                      title: "Integration Watchdog"
+                      message: >-
+                        {{ repeat.item.name }} failed to recover after
+                        auto-reload. May need manual intervention.
+                      data:
+                        tag: "{{ repeat.item.tag }}"
+  mode: single
